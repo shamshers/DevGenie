@@ -1,0 +1,6 @@
+streamlit
+anthropic
+langchain
+qdrant-client
+sentence-transformers
+tqdm
