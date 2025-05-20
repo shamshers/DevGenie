@@ -25,13 +25,18 @@ if st.button("Submit") and user_input.strip():
 
 for chat in st.session_state["history"][::-1]:
     st.markdown(f"**You:** {chat['user']}")
-    st.markdown("**DevGenie Response:**")
-    if "code" in chat['result']:
-        st.code(chat['result']['code'], language="python")
-    if "issues" in chat['result'] and chat['result']['issues']:
-        st.warning(f"Issues Found: {chat['result']['issues']}")
-    if "fixed_code" in chat['result'] and chat['result']['fixed_code']:
-        st.code(chat['result']['fixed_code'], language="python")
-    if "explanation" in chat['result']:
-        st.success(f"Explanation: {chat['result']['explanation']}")
+    result = chat['result']
+    if result.get('code'):
+        st.subheader("📝 Generated Code")
+        st.code(result['code'], language="python")
+    if result.get('issues') and result['issues'] not in ["None", "", None]:
+        st.subheader("🔍 Code Review")
+        st.warning(result['issues'])
+    if result.get('fixed_code') and result['fixed_code'].lower() != "no change needed":
+        st.subheader("🛠️ Fixed Code")
+        st.code(result['fixed_code'], language="python")
+    if result.get('explanation'):
+        st.subheader("💡 Explanation")
+        st.success(result['explanation'])
     st.divider()
+
