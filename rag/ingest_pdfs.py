@@ -3,7 +3,7 @@ from utils.pdf_utils import extract_text_from_pdf
 from utils.chunking import chunk_text
 from rag.vectorstore import ingest_documents
 
-PDF_FOLDER = "data/docs"
+PDF_FOLDER = "/Users/shamshersingh/PycharmProjects/devgenie/data/docs"
 COLLECTION_NAME = "docs"
 
 def main():

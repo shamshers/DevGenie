@@ -1,53 +1,52 @@
-from langchain.vectorstores import Qdrant
-from langchain.embeddings import SentenceTransformerEmbeddings
 from qdrant_client import QdrantClient
-from qdrant_client.http import models as rest
-import os
+from qdrant_client.http.models import PointStruct, VectorParams, Distance
+from transformers import AutoTokenizer, AutoModel
+import torch
+# ... (add embedding code above)
 
-# Set up embeddings and Qdrant client
-EMBED_MODEL = "all-MiniLM-L6-v2"
-
-def get_embeddings():
-    return SentenceTransformerEmbeddings(model_name=EMBED_MODEL)
-
-def get_qdrant_client():
-    qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    return QdrantClient(url=qdrant_url)
-
-def get_qdrant_vectorstore(collection_name="docs"):
-    embeddings = get_embeddings()
-    client = get_qdrant_client()
-    vectorstore = Qdrant(
-        client=client,
-        collection_name=collection_name,
-        embeddings=embeddings,
-    )
-    return vectorstore
-
-def create_collection(collection_name="docs"):
-    """Create collection if not exists."""
-    client = get_qdrant_client()
-    if collection_name not in [c.name for c in client.get_collections().collections]:
-        client.recreate_collection(
+def ingest_documents(docs, collection_name):
+    qdrant = QdrantClient(host="localhost", port=6333)
+    dim = 768  # for gte-base, adjust if using another model
+    if not qdrant.collection_exists(collection_name):
+        qdrant.recreate_collection(
             collection_name=collection_name,
-            vectors_config=rest.VectorParams(
-                size=384,  # for MiniLM
-                distance=rest.Distance.COSINE
-            ),
+            vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
         )
+    points = []
+    for idx, doc in enumerate(docs):
+        text = doc["text"]
+        metadata = doc.get("metadata", {})
+        vector = get_embedding(text)
+        points.append(
+            PointStruct(
+                id=idx,
+                vector=vector,
+                payload={**metadata, "text": text}
+            )
+        )
+    if points:
+        qdrant.upsert(collection_name=collection_name, points=points)
+        print(f"Upserted {len(points)} points to Qdrant.")
 
-def ingest_documents(docs, collection_name="docs"):
-    """
-    Ingest a list of docs.
-    Each doc should be dict: {"text": "...", "metadata": {...}}
-    """
-    create_collection(collection_name)
-    vectorstore = get_qdrant_vectorstore(collection_name)
-    texts = [doc["text"] for doc in docs]
-    metadatas = [doc.get("metadata", {}) for doc in docs]
-    vectorstore.add_texts(texts=texts, metadatas=metadatas)
 
-def query_similar(query, k=3, collection_name="docs"):
-    """Retrieve top-k similar chunks."""
-    vectorstore = get_qdrant_vectorstore(collection_name)
-    return vectorstore.similarity_search(query, k=k)
+
+# Pick a model that outputs sentence embeddings; 'sentence-transformers' models work, but you can use others, e.g.:
+MODEL_NAME = "thenlper/gte-base"  # Compact, good for general use
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModel.from_pretrained(MODEL_NAME)
+
+def get_embedding(text):
+    # Tokenize input
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+    # Get model outputs
+    with torch.no_grad():
+        outputs = model(**inputs)
+    # Mean Pooling (take average over token embeddings)
+    last_hidden = outputs.last_hidden_state  # [batch, seq, hidden]
+    attention_mask = inputs["attention_mask"]
+    mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).float()
+    sum_embeddings = torch.sum(last_hidden * mask_expanded, dim=1)
+    sum_mask = torch.clamp(mask_expanded.sum(dim=1), min=1e-9)
+    embedding = (sum_embeddings / sum_mask).squeeze().cpu().numpy()
+    return embedding.tolist()
